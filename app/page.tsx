@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { SendHorizontal, Bot, User, Upload } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -24,77 +24,122 @@ export default function ChatPage() {
   >("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // Upload + Ingest
+  // ⏱ upload limiter (1 min)
+  const lastUploadRef = useRef<number | null>(null);
+
+  /* ---------------- UPLOAD + INGEST ---------------- */
 
   async function uploadFile(file: File) {
+    // ⛔ Client-side rate limit
+    if (
+      lastUploadRef.current &&
+      Date.now() - lastUploadRef.current < 60_000
+    ) {
+      alert("Please wait 1 minute before uploading another file.");
+      return;
+    }
+
     setUploadStatus("uploading");
     setUploadProgress(0);
-    console.log("Uploading file:", file.name);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
-      console.log("FormData prepared");
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/ingest");
-      console.log("XMLHttpRequest opened");
 
       xhr.upload.onprogress = (e) => {
-  if (e.lengthComputable) {
-    setUploadProgress(Math.round((e.loaded / e.total) * 100));
-    console.log("Upload progress:", e.loaded, "/", e.total);
-  }
-};
-
+        if (e.lengthComputable) {
+          setUploadProgress(
+            Math.round((e.loaded / e.total) * 100)
+          );
+        }
+      };
 
       xhr.onload = () => {
+        // ✅ SUCCESS
         if (xhr.status === 200) {
+          lastUploadRef.current = Date.now();
           setUploadStatus("completed");
           setUploadProgress(100);
-          setTimeout(() => setUploadStatus("idle"), 5000);
-        } else {
+
+          setTimeout(() => {
+            setUploadStatus("idle");
+            setUploadProgress(0);
+          }, 4000);
+        }
+
+        // ⏱ RATE LIMIT FROM SERVER
+        else if (xhr.status === 429) {
+          setUploadStatus("error");
+          alert("Upload limited. Please wait 1 minute.");
+        }
+
+        // ❌ OTHER ERRORS
+        else {
           setUploadStatus("error");
         }
       };
 
       xhr.onerror = () => setUploadStatus("error");
+
       xhr.send(formData);
-    } catch {
+    } catch (err) {
+      console.error("Upload failed:", err);
       setUploadStatus("error");
     }
   }
 
-  // Send chat message
+  /* ---------------- CHAT ---------------- */
 
   async function send() {
-    if (!input.trim()) return;
+    if (!input.trim() || loading) return;
 
-    setUploadStatus("idle"); // hide upload message
+    setUploadStatus("idle");
 
-    const userMessage: Message = { role: "user", content: input };
+    const userMessage: Message = {
+      role: "user",
+      content: input,
+    };
+
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userMessage.content }),
-    });
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMessage.content }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: data.answer },
-    ]);
-
-    setLoading(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.answer || "I don't know.",
+        },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Something went wrong.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  /* ---------------- UI (UNCHANGED) ---------------- */
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-screen flex bg-linear-to-b from-gray-700 to-gray-200 items-center justify-center p-4">
       <Card className="w-full max-w-3xl h-[85vh] flex flex-col rounded-2xl shadow-xl">
         <CardHeader className="border-b">
           <div className="flex items-center gap-2">
@@ -114,7 +159,9 @@ export default function ChatPage() {
                   key={i}
                   className={cn(
                     "flex gap-3",
-                    msg.role === "user" ? "justify-end" : "justify-start"
+                    msg.role === "user"
+                      ? "justify-end"
+                      : "justify-start"
                   )}
                 >
                   {msg.role === "assistant" && (
@@ -159,7 +206,7 @@ export default function ChatPage() {
           <div className="flex items-end gap-2">
             <Button
               type="button"
-              className="h-16 w-16 rounded-xl"
+              className="h-16 w-16 rounded-xl "
               onClick={() =>
                 document.getElementById("file-upload")?.click()
               }

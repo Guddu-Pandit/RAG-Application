@@ -1,21 +1,10 @@
- // Split text into overlapping chunks for RAG
-export function chunkText(
-  text: string,
-  chunkSize = 800,
-  overlap = 100
-): string[] {
-  if (!text) return [];
-
+export function chunkText(text: string, size = 1000, overlap = 200) {
   const chunks: string[] = [];
   let start = 0;
 
   while (start < text.length) {
-    const end = start + chunkSize;
-    const chunk = text.slice(start, end).trim();
-
-    if (chunk) chunks.push(chunk);
-
-    start += chunkSize - overlap;
+    chunks.push(text.slice(start, start + size));
+    start += size - overlap;
   }
 
   return chunks;

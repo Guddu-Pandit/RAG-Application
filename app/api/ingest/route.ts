@@ -1,61 +1,131 @@
 import { NextResponse } from "next/server";
-import { createServerClientSupabase } from "@/lib/supabase/server";
 import mammoth from "mammoth";
 import { extractText } from "unpdf";
+
+import { createServerClientSupabase } from "@/lib/supabase/server";
+import { chunkText } from "@/lib/utils/chunk";
+import { embedText } from "@/lib/gemini/embed";
+import { summarizeText } from "@/lib/gemini/sumarize";
+import { index } from "@/lib/pinecone/client";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  console.log("➡️ INGEST API HIT");
-
   try {
-    const supabase = await createServerClientSupabase();
-    console.log("✅ Supabase client created");
+    const supabase = createServerClientSupabase();
 
-    const formData = await req.formData();
-    console.log("✅ FormData read");
+    /* ---------------- RATE LIMIT ---------------- */
+    const { data: logs, error: logError } = await supabase
+      .from("upload_logs")
+      .select("created_at")
+      .order("created_at", { ascending: false })
+      .limit(1);
 
-    const file = formData.get("file") as File;
-    console.log("📄 File:", file?.name, file?.type);
-
-    if (!file) {
-      throw new Error("No file received");
+    if (logError) {
+      console.error("UPLOAD LOG ERROR:", logError);
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    console.log("✅ arrayBuffer read");
+    if (logs?.[0]) {
+      const last = new Date(logs[0].created_at).getTime();
+      if (Date.now() - last < 60_000) {
+        return NextResponse.json(
+          { error: "Wait 1 minute before uploading again" },
+          { status: 429 }
+        );
+      }
+    }
 
+    /* ---------------- FILE ---------------- */
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+
+    if (!file) {
+      return NextResponse.json(
+        { error: "No file uploaded" },
+        { status: 400 }
+      );
+    }
+
+    console.log("FILE:", file.name, file.type);
+
+    /* ---------------- SUPABASE STORAGE ---------------- */
+    const uploadPath = `${Date.now()}-${file.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("rag")
+      .upload(uploadPath, file);
+
+    if (uploadError) {
+      console.error("SUPABASE UPLOAD ERROR:", uploadError);
+      throw new Error("Supabase upload failed");
+    }
+
+    /* ---------------- TEXT EXTRACTION ---------------- */
+    const buffer = Buffer.from(await file.arrayBuffer());
     let text = "";
 
     if (file.name.toLowerCase().endsWith(".pdf")) {
-      const result = await extractText(new Uint8Array(arrayBuffer));
-      console.log("📘 PDF extract result type:", typeof result);
-
-      if (typeof result === "string") {
-        text = result;
-      } else if (Array.isArray(result?.text)) {
-        text = result.text.join("\n");
-      } else {
-        throw new Error("PDF text extraction failed");
-      }
+      const pdf = await extractText(buffer);
+      text = Array.isArray(pdf.text)
+        ? pdf.text.join("\n")
+        : "";
     } else {
-      const doc = await mammoth.extractRawText({
-        buffer: Buffer.from(arrayBuffer),
-      });
+      const doc = await mammoth.extractRawText({ buffer });
       text = doc.value;
     }
 
-    console.log("📝 Extracted text length:", text.length);
-
-    if (!text.trim()) {
-      throw new Error("Extracted text is empty");
+    if (!text || text.trim().length < 50) {
+      return NextResponse.json(
+        { error: "Unable to extract text (scanned or empty PDF)" },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error("❌ INGEST ERROR:", err);
+    console.log("TEXT LENGTH:", text.length);
+
+    /* ---------------- SUMMARY ---------------- */
+    const summary = await summarizeText(text);
+
+    await supabase.from("documents").insert({
+      filename: file.name,
+      summary,
+    });
+
+    /* ---------------- VECTOR STORE ---------------- */
+    const chunks = chunkText(text);
+
+    const vectors = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = await embedText(chunks[i]);
+
+      vectors.push({
+        id: `${uploadPath}-${i}`,
+        values: embedding,
+        metadata: {
+          text: chunks[i],
+          source: file.name,
+        },
+      });
+    }
+
+    await index.upsert(vectors);
+
+    /* ---------------- LOG SUCCESS ---------------- */
+    await supabase.from("upload_logs").insert({});
+
+    return NextResponse.json({
+      success: true,
+      summary,
+    });
+  } catch (err) {
+    console.error("INGEST FAILED:", err);
+
     return NextResponse.json(
-      { error: err.message ?? "Internal error" },
+      {
+        error: "Ingest failed",
+        message: (err as Error).message,
+      },
       { status: 500 }
     );
   }

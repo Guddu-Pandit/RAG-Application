@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, User, Upload, SendHorizontal } from "lucide-react";
-import { createServer } from "@/lib/supabase/server";
+import { SendHorizontal, Bot, User, Upload } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,59 +18,57 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
   const [uploadStatus, setUploadStatus] = useState<
     "idle" | "uploading" | "completed" | "error"
   >("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-async function uploadFile(file: File) {
-  setUploadStatus("uploading");
-  setUploadProgress(0);
+  // ============================
+  // Upload + Ingest
+  // ============================
+  async function uploadFile(file: File) {
+    setUploadStatus("uploading");
+    setUploadProgress(0);
+    console.log("Uploading file:", file.name);
 
-  try {
-    const supabase = await createServer();
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
 
-    // 1️⃣ Upload to bucket 'tech'
-    const filePath = `${Date.now()}-${file.name}`;
-    const { data: storageData, error: storageError } = await supabase.storage
-      .from("tech")
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: true,
-      });
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/ingest");
 
-    if (storageError) throw storageError;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
 
-    setUploadProgress(50);
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          setUploadStatus("completed");
+          setUploadProgress(100);
+          setTimeout(() => setUploadStatus("idle"), 5000);
+        } else {
+          setUploadStatus("error");
+        }
+      };
 
-    // 2️⃣ Extract text (via API)
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch("/api/ingest", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) throw new Error("Ingestion failed");
-
-    setUploadProgress(100);
-    setUploadStatus("completed");
-
-    // Reset after 5s
-    setTimeout(() => setUploadStatus("idle"), 5000);
-
-  } catch (err) {
-    console.error(err);
-    setUploadStatus("error");
-    setUploadProgress(null);
-    setTimeout(() => setUploadStatus("idle"), 5000);
+      xhr.onerror = () => setUploadStatus("error");
+      xhr.send(formData);
+    } catch {
+      setUploadStatus("error");
+    }
   }
-}
 
+  // ============================
+  // Send chat message
+  // ============================
   async function send() {
     if (!input.trim()) return;
+
+    setUploadStatus("idle"); // hide upload message
 
     const userMessage: Message = { role: "user", content: input };
     setMessages((prev) => [...prev, userMessage]);
@@ -95,9 +92,8 @@ async function uploadFile(file: File) {
   }
 
   return (
-    <div className="min-h-screen  to-muted flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-3xl h-[85vh] flex flex-col rounded-2xl shadow-xl">
-        {/* Header */}
         <CardHeader className="border-b">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-primary" />
@@ -108,7 +104,6 @@ async function uploadFile(file: File) {
           </p>
         </CardHeader>
 
-        {/* Messages */}
         <CardContent className="flex-1 p-0">
           <ScrollArea className="h-full px-6 py-4">
             <div className="space-y-4">
@@ -128,7 +123,7 @@ async function uploadFile(file: File) {
 
                   <div
                     className={cn(
-                      "max-w-[75%] rounded-xl px-4 py-2 text-sm leading-relaxed",
+                      "max-w-[75%] rounded-xl px-4 py-2 text-sm",
                       msg.role === "user"
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted"
@@ -147,10 +142,8 @@ async function uploadFile(file: File) {
 
               {loading && (
                 <div className="flex gap-3">
-                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Bot className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="bg-muted px-4 py-2 rounded-xl text-sm animate-pulse">
+                  <Bot className="h-8 w-8 text-primary" />
+                  <div className="bg-muted px-4 py-2 rounded-xl animate-pulse">
                     Thinking…
                   </div>
                 </div>
@@ -159,72 +152,64 @@ async function uploadFile(file: File) {
           </ScrollArea>
         </CardContent>
 
-        {/* Input */}
+        {/* INPUT */}
         <div className="border-t p-4">
           <div className="flex items-end gap-2">
-            {/* Upload button */}
             <Button
               type="button"
-              className="h-16 w-16 rounded-xl flex items-center justify-center"
-              onClick={() => document.getElementById("file-upload")?.click()}
+              className="h-16 w-16 rounded-xl"
+              onClick={() =>
+                document.getElementById("file-upload")?.click()
+              }
             >
-              <Upload size={28} strokeWidth={2} className="fontsize-1xl" />
+              <Upload size={28} className="fontsize-1xl"/>
             </Button>
-            {/* Text input */}
-           <Textarea
-  value={input}
-  onChange={(e) => {
-    setInput(e.target.value);
 
-    // Hide upload message if user types
-    if (uploadStatus === "completed") setUploadStatus("idle");
-  }}
-  placeholder="Ask a question or upload a document…"
-  rows={2}
-  className="resize-none"
-  onKeyDown={(e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-      if (uploadStatus === "completed") setUploadStatus("idle");
-    }
-  }}
-/>
-
-
-            {/* Hidden file input */}
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx"
-              className="hidden"
-              id="file-upload"
+            <Textarea
+              value={input}
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-
-                setUploadedFile(file);
-                uploadFile(file);
+                setInput(e.target.value);
+                setUploadStatus("idle");
+              }}
+              placeholder="Ask a question or upload a document…"
+              rows={2}
+              className="resize-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
               }}
             />
 
-            {/* Send button */}
             <Button
               onClick={send}
               disabled={loading}
-              className="rounded-xl h-16 w-16 flex items-center justify-center"
+              className="h-16 w-16 rounded-xl"
             >
-              <SendHorizontal
-                size={32}
-                strokeWidth={1.75}
-                className="fontsize-1xl"
-              />
+              <SendHorizontal size={30} className="fontsize-1xl"/>
             </Button>
           </div>
+
+          <input
+            type="file"
+            id="file-upload"
+            className="hidden"
+            accept=".pdf,.doc,.docx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadFile(file);
+            }}
+          />
+
           {uploadStatus !== "idle" && (
-            <p className="text-xs px-18 text-muted-foreground mt-1">
-              {uploadStatus === "uploading" && `Uploading… ${uploadProgress}%`}
-              {uploadStatus === "completed" && "✅ Upload completed & indexed"}
-              {uploadStatus === "error" && "❌ Upload failed"}
+            <p className="text-xs mt-2 text-muted-foreground">
+              {uploadStatus === "uploading" &&
+                `Uploading… ${uploadProgress}%`}
+              {uploadStatus === "completed" &&
+                "✅ Upload completed & indexed"}
+              {uploadStatus === "error" &&
+                "❌ Upload failed"}
             </p>
           )}
         </div>

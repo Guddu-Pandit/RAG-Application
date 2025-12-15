@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Send, Bot, User, Upload } from "lucide-react";
+import { Bot, User, Upload, SendHorizontal } from "lucide-react";
+import { createServer } from "@/lib/supabase/server";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,55 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<
+    "idle" | "uploading" | "completed" | "error"
+  >("idle");
 
+async function uploadFile(file: File) {
+  setUploadStatus("uploading");
+  setUploadProgress(0);
+
+  try {
+    const supabase = await createServer();
+
+    // 1️⃣ Upload to bucket 'tech'
+    const filePath = `${Date.now()}-${file.name}`;
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from("tech")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+      });
+
+    if (storageError) throw storageError;
+
+    setUploadProgress(50);
+
+    // 2️⃣ Extract text (via API)
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("/api/ingest", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error("Ingestion failed");
+
+    setUploadProgress(100);
+    setUploadStatus("completed");
+
+    // Reset after 5s
+    setTimeout(() => setUploadStatus("idle"), 5000);
+
+  } catch (err) {
+    console.error(err);
+    setUploadStatus("error");
+    setUploadProgress(null);
+    setTimeout(() => setUploadStatus("idle"), 5000);
+  }
+}
 
   async function send() {
     if (!input.trim()) return;
@@ -113,29 +162,35 @@ export default function ChatPage() {
         {/* Input */}
         <div className="border-t p-4">
           <div className="flex items-end gap-2">
-
             {/* Upload button */}
             <Button
               type="button"
               className="h-16 w-16 rounded-xl flex items-center justify-center"
               onClick={() => document.getElementById("file-upload")?.click()}
             >
-              <Upload size={28} strokeWidth={2.5} />
+              <Upload size={28} strokeWidth={2} className="fontsize-1xl" />
             </Button>
             {/* Text input */}
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question or upload a document…"
-              rows={2}
-              className="resize-none"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-            />
+           <Textarea
+  value={input}
+  onChange={(e) => {
+    setInput(e.target.value);
+
+    // Hide upload message if user types
+    if (uploadStatus === "completed") setUploadStatus("idle");
+  }}
+  placeholder="Ask a question or upload a document…"
+  rows={2}
+  className="resize-none"
+  onKeyDown={(e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+      if (uploadStatus === "completed") setUploadStatus("idle");
+    }
+  }}
+/>
+
 
             {/* Hidden file input */}
             <input
@@ -145,13 +200,12 @@ export default function ChatPage() {
               id="file-upload"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                  console.log("Uploaded:", file.name);
-                }
+                if (!file) return;
+
+                setUploadedFile(file);
+                uploadFile(file);
               }}
             />
-
-            
 
             {/* Send button */}
             <Button
@@ -159,9 +213,20 @@ export default function ChatPage() {
               disabled={loading}
               className="rounded-xl h-16 w-16 flex items-center justify-center"
             >
-              <Send size={28} strokeWidth={1.75} />
+              <SendHorizontal
+                size={32}
+                strokeWidth={1.75}
+                className="fontsize-1xl"
+              />
             </Button>
           </div>
+          {uploadStatus !== "idle" && (
+            <p className="text-xs px-18 text-muted-foreground mt-1">
+              {uploadStatus === "uploading" && `Uploading… ${uploadProgress}%`}
+              {uploadStatus === "completed" && "✅ Upload completed & indexed"}
+              {uploadStatus === "error" && "❌ Upload failed"}
+            </p>
+          )}
         </div>
       </Card>
     </div>

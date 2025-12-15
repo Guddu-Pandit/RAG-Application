@@ -31,10 +31,7 @@ export default function ChatPage() {
 
   async function uploadFile(file: File) {
     // ⛔ Client-side rate limit
-    if (
-      lastUploadRef.current &&
-      Date.now() - lastUploadRef.current < 60_000
-    ) {
+    if (lastUploadRef.current && Date.now() - lastUploadRef.current < 60_000) {
       alert("Please wait 1 minute before uploading another file.");
       return;
     }
@@ -51,9 +48,7 @@ export default function ChatPage() {
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          setUploadProgress(
-            Math.round((e.loaded / e.total) * 100)
-          );
+          setUploadProgress(Math.round((e.loaded / e.total) * 100));
         }
       };
 
@@ -159,9 +154,7 @@ export default function ChatPage() {
                   key={i}
                   className={cn(
                     "flex gap-3",
-                    msg.role === "user"
-                      ? "justify-end"
-                      : "justify-start"
+                    msg.role === "user" ? "justify-end" : "justify-start"
                   )}
                 >
                   {msg.role === "assistant" && (
@@ -207,11 +200,9 @@ export default function ChatPage() {
             <Button
               type="button"
               className="h-16 w-16 rounded-xl "
-              onClick={() =>
-                document.getElementById("file-upload")?.click()
-              }
+              onClick={() => document.getElementById("file-upload")?.click()}
             >
-              <Upload size={28} className="fontsize-1xl"/>
+              <Upload size={28} className="fontsize-1xl" />
             </Button>
 
             <Textarea
@@ -236,7 +227,7 @@ export default function ChatPage() {
               disabled={loading}
               className="h-16 w-16 rounded-xl"
             >
-              <SendHorizontal size={30} className="fontsize-1xl"/>
+              <SendHorizontal size={30} className="fontsize-1xl" />
             </Button>
           </div>
 
@@ -253,12 +244,9 @@ export default function ChatPage() {
 
           {uploadStatus !== "idle" && (
             <p className="text-xs mt-2 text-muted-foreground">
-              {uploadStatus === "uploading" &&
-                `Uploading… ${uploadProgress}%`}
-              {uploadStatus === "completed" &&
-                "✅ Upload completed & indexed"}
-              {uploadStatus === "error" &&
-                "❌ Upload failed"}
+              {uploadStatus === "uploading" && `Uploading… ${uploadProgress}%`}
+              {uploadStatus === "completed" && "✅ Upload completed & indexed"}
+              {uploadStatus === "error" && "❌ Upload failed"}
             </p>
           )}
         </div>

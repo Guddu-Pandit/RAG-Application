@@ -3,21 +3,47 @@ import { embedText } from "@/lib/gemini/embed";
 import { generateAnswer } from "@/lib/gemini/generate";
 import { index } from "@/lib/pinecone/client";
 
+export const runtime = "nodejs";
+
 export async function POST(req: Request) {
-  const { message } = await req.json();
+  try {
+    const { message } = await req.json();
 
-  const embedding = await embedText(message);
+    if (!message || typeof message !== "string") {
+      return NextResponse.json(
+        { error: "Message is required" },
+        { status: 400 }
+      );
+    }
 
-  const res = await index.query({
-    vector: embedding,
-    topK: 5,
-    includeMetadata: true,
-  });
+    // 1. Embed user query
+    const embedding = await embedText(message);
 
-  const context =
-    res.matches?.map(m => m.metadata?.text).join("\n") || "";
+    // 2. Vector search
+    const res = await index.query({
+      vector: embedding,
+      topK: 5,
+      includeMetadata: true,
+    });
 
-  const answer = await generateAnswer(message, context);
+    // 3. Build context safely
+    const context =
+      res.matches
+        ?.map(
+          (m) => (m.metadata as { text?: string })?.text
+        )
+        .filter(Boolean)
+        .join("\n\n") ?? "";
 
-  return NextResponse.json({ answer });
+    // 4. Generate answer
+    const answer = await generateAnswer(message, context);
+
+    return NextResponse.json({ answer });
+  } catch (error) {
+    console.error("Chat error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
 }

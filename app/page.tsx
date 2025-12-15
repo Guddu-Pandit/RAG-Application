@@ -24,9 +24,8 @@ export default function ChatPage() {
   >("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // ============================
   // Upload + Ingest
-  // ============================
+
   async function uploadFile(file: File) {
     setUploadStatus("uploading");
     setUploadProgress(0);
@@ -35,15 +34,19 @@ export default function ChatPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      console.log("FormData prepared");
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/ingest");
+      console.log("XMLHttpRequest opened");
 
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
+  if (e.lengthComputable) {
+    setUploadProgress(Math.round((e.loaded / e.total) * 100));
+    console.log("Upload progress:", e.loaded, "/", e.total);
+  }
+};
+
 
       xhr.onload = () => {
         if (xhr.status === 200) {
@@ -62,9 +65,8 @@ export default function ChatPage() {
     }
   }
 
-  // ============================
   // Send chat message
-  // ============================
+
   async function send() {
     if (!input.trim()) return;
 
@@ -171,7 +173,7 @@ export default function ChatPage() {
                 setInput(e.target.value);
                 setUploadStatus("idle");
               }}
-              placeholder="Ask a question or upload a document…"
+              placeholder="Ask a question on uploaded document…"
               rows={2}
               className="resize-none"
               onKeyDown={(e) => {

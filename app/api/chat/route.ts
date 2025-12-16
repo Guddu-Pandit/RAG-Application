@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { langfuse } from "@/lib/langfuse/client";
 import { embedText } from "@/lib/gemini/embed";
 import { generateAnswer } from "@/lib/gemini/generate";
 import { index } from "@/lib/pinecone/client";
@@ -6,40 +7,43 @@ import { index } from "@/lib/pinecone/client";
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  // ✅ Create trace (NO .end() on traces)
+  const trace = langfuse.trace({
+    name: "chat_request",
+  });
+
   try {
-    console.log("📩 Chat request received");
+    const { message } = await req.json();
 
-    const body = await req.json();
-    console.log("📦 Body:", body);
-
-    const { message } = body;
-
-    if (!message || !message.trim()) {
+    if (!message?.trim()) {
       return NextResponse.json(
         { error: "Message required" },
         { status: 400 }
       );
     }
 
-    console.log("🧠 Embedding query...");
-    const embedding = await embedText(message);
-    console.log("✅ Embedding length:", embedding.length);
+    /* 🔹 Embed */
+    const embedding = await embedText(trace.id, message);
 
-    console.log("🔍 Querying Pinecone...");
+    /* 🔹 Retrieve */
+    const retrieveSpan = langfuse.span({
+      traceId: trace.id,
+      name: "pinecone_retrieve",
+      input: { topK: 5 },
+    });
+
     const result = await index.query({
       vector: embedding,
       topK: 5,
       includeMetadata: true,
     });
 
-    console.log(
-      "📊 Matches found:",
-      result.matches?.length ?? 0
-    );
-
-    if (!result.matches || result.matches.length === 0) {
-      console.warn("⚠️ No relevant chunks found");
-    }
+    // ✅ END SPAN (correct)
+    retrieveSpan.end({
+      output: {
+        matches: result.matches?.length ?? 0,
+      },
+    });
 
     const context =
       result.matches
@@ -47,20 +51,36 @@ export async function POST(req: Request) {
         .filter(Boolean)
         .join("\n\n") || "";
 
-    console.log("📄 Context length:", context.length);
+    /* 🔹 RAG decision logging */
+    langfuse.event({
+      traceId: trace.id,
+      name: "rag_decision",
+      metadata: {
+        usedRAG: Boolean(context),
+        contextLength: context.length,
+      },
+    });
 
-    console.log("✍️ Generating answer...");
-    const answer = await generateAnswer(message, context);
-
-    console.log("✅ Answer generated");
+    /* 🔹 Generate */
+    const answer = await generateAnswer(
+      trace.id,
+      message,
+      context
+    );
 
     return NextResponse.json({ answer });
   } catch (err: any) {
-    console.error("❌ Chat API error:", err?.message || err);
-    console.error(err?.stack);
+    // ✅ Log error WITHOUT crashing
+    langfuse.event({
+      traceId: trace.id,
+      name: "error",
+      metadata: {
+        message: err?.message ?? "unknown error",
+      },
+    });
 
     return NextResponse.json(
-      { error: err?.message || "Chat failed" },
+      { error: "Chat failed" },
       { status: 500 }
     );
   }

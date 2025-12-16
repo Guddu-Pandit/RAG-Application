@@ -7,20 +7,28 @@ import { chunkText } from "@/lib/utils/chunk";
 import { embedText } from "@/lib/gemini/embed";
 import { summarizeText } from "@/lib/gemini/sumarize";
 import { index } from "@/lib/pinecone/client";
+import { langfuse } from "@/lib/langfuse/client";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  const trace = langfuse.trace({
+    name: "document_ingest",
+  });
+
   try {
     const supabase = createServerClientSupabase();
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
     if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No file uploaded" },
+        { status: 300 }
+      );
     }
 
-    /* 1️⃣ Upload file to Supabase bucket */
+    /* 1️⃣ Upload file to Supabase */
     const filePath = `${Date.now()}-${file.name}`;
     await supabase.storage.from("rag").upload(filePath, file);
 
@@ -43,12 +51,15 @@ export async function POST(req: Request) {
       );
     }
 
-    /* 3️⃣ Optional summary */
+    /* 3️⃣ Summarize */
     let summary = "Summary unavailable";
     try {
       summary = await summarizeText(text);
     } catch (e) {
-      console.error("Summary failed", e);
+      langfuse.event({
+        traceId: trace.id,
+        name: "summary_failed",
+      });
     }
 
     await supabase.from("documents").insert({
@@ -57,25 +68,77 @@ export async function POST(req: Request) {
       path: filePath,
     });
 
-    /* 4️⃣ Chunk + Embed + Pinecone */
-    const chunks = chunkText(text);
+ /* 4️⃣ Chunk + Embed + Pinecone */
+const chunks = chunkText(text);
 
-    const vectors = await Promise.all(
-      chunks.map(async (chunk, i) => ({
-        id: `${filePath}-${i}`,
-        values: await embedText(chunk),
-        metadata: {
-          text: chunk,
-          source: file.name,
-        },
-      }))
-    );
+const vectors = [];
 
-    await index.upsert(vectors);
+for (let i = 0; i < chunks.length; i++) {
+  const chunk = chunks[i];
+
+  const embedding = await embedText(trace.id, chunk);
+
+  // 🚨 CRITICAL CHECK
+  if (!embedding || embedding.length === 0) {
+    console.error("❌ Empty embedding for chunk", i);
+
+    langfuse.event({
+      traceId: trace.id,
+      name: "empty_embedding",
+      metadata: { chunkIndex: i },
+    });
+
+    continue;
+  }
+
+  vectors.push({
+    id: `${filePath}-${i}`,
+    values: embedding,
+    metadata: {
+      text: chunk.slice(0, 1000), // 🔥 limit metadata size
+      source: file.name,
+      chunkIndex: i,
+    },
+  });
+}
+
+console.log("📦 VECTORS READY:", {
+  count: vectors.length,
+  dimension: vectors[0]?.values?.length,
+});
+
+if (vectors.length === 0) {
+  throw new Error("No valid vectors to upsert");
+}
+
+try {
+  const upsertResponse = await index.upsert(vectors);
+  console.log("✅ Pinecone upsert response:", upsertResponse);
+} catch (err: any) {
+  console.error("❌ Pinecone upsert failed:", err);
+
+  langfuse.event({
+    traceId: trace.id,
+    name: "pinecone_upsert_failed",
+    metadata: {
+      message: err.message,
+      stack: err.stack,
+    },
+  });
+
+  throw err;
+}
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("Ingest error:", err);
+  } catch (err: any) {
+    langfuse.event({
+      traceId: trace.id,
+      name: "ingest_error",
+      metadata: {
+        message: err?.message,
+      },
+    });
+
     return NextResponse.json(
       { error: "Failed to ingest document" },
       { status: 500 }

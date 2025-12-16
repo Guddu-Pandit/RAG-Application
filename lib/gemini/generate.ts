@@ -1,31 +1,36 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
+import { getSystemPrompt } from "@/lib/langfuse/prompt";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
 
 export async function generateAnswer(
+  traceId: string,
   question: string,
   context: string
 ): Promise<string> {
-  if (!context.trim()) {
-    return "I don't know.";
-  }
+  try {
+    const systemPrompt = await getSystemPrompt();
 
-  const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", 
-  });
-
-  const prompt = `
-You are a document-based assistant.
-Answer ONLY using the context.
-If the answer is not present, say "I don't know".
+    const prompt = `
+${systemPrompt}
 
 Context:
-${context}
+${context || "No context available"}
 
 Question:
 ${question}
 `;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash", // ✅ VALID
+      contents: prompt,
+    });
+
+    return response.text || "No answer generated.";
+  } catch (err: any) {
+    console.error("❌ Gemini generate failed:", err.message);
+    return "Sorry, I couldn’t generate an answer at the moment.";
+  }
 }

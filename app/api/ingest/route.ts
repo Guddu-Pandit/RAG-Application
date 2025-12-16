@@ -11,86 +11,74 @@ import { index } from "@/lib/pinecone/client";
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  const supabase = createServerClientSupabase();
+  try {
+    const supabase = createServerClientSupabase();
+    const formData = await req.formData();
+    const file = formData.get("file") as File;
 
-  /* ⏱ Rate limit */
-  const { data: logs } = await supabase
-    .from("upload_logs")
-    .select("created_at")
-    .order("created_at", { ascending: false })
-    .limit(1);
+    if (!file) {
+      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    }
 
-  if (logs?.[0]) {
-    const last = new Date(logs[0].created_at).getTime();
-    if (Date.now() - last < 60_000) {
+    /* 1️⃣ Upload file to Supabase bucket */
+    const filePath = `${Date.now()}-${file.name}`;
+    await supabase.storage.from("rag").upload(filePath, file);
+
+    /* 2️⃣ Extract text */
+    const buffer = Buffer.from(await file.arrayBuffer());
+    let text = "";
+
+    if (file.name.endsWith(".pdf")) {
+      const res = await extractText(new Uint8Array(buffer));
+      text = typeof res === "string" ? res : res.text.join("\n");
+    } else {
+      const res = await mammoth.extractRawText({ buffer });
+      text = res.value;
+    }
+
+    if (!text || text.length < 100) {
       return NextResponse.json(
-        { error: "Wait 1 minute before uploading again" },
-        { status: 429 }
+        { error: "Unable to extract text" },
+        { status: 400 }
       );
     }
-  }
 
-  const formData = await req.formData();
-  const file = formData.get("file") as File;
-
-  if (!file) {
-    return NextResponse.json({ error: "No file" }, { status: 400 });
-  }
-
-  /* Upload */
-  await supabase.storage.from("rag").upload(`${Date.now()}-${file.name}`, file);
-
-  const arrayBuffer = await file.arrayBuffer();
-  let text = "";
-
-  if (file.name.endsWith(".pdf")) {
-    // ✅ unpdf requires Uint8Array
-    const res = await extractText(new Uint8Array(arrayBuffer));
-
-    if (typeof res === "string") {
-      text = res;
-    } else if (Array.isArray(res?.text)) {
-      text = res.text.join("\n");
+    /* 3️⃣ Optional summary */
+    let summary = "Summary unavailable";
+    try {
+      summary = await summarizeText(text);
+    } catch (e) {
+      console.error("Summary failed", e);
     }
-  } else {
-    // ✅ mammoth requires Buffer
-    const res = await mammoth.extractRawText({
-      buffer: Buffer.from(arrayBuffer),
-    });
-    text = res.value;
-  }
 
-  if (!text || text.trim().length < 50) {
+    await supabase.from("documents").insert({
+      filename: file.name,
+      summary,
+      path: filePath,
+    });
+
+    /* 4️⃣ Chunk + Embed + Pinecone */
+    const chunks = chunkText(text);
+
+    const vectors = await Promise.all(
+      chunks.map(async (chunk, i) => ({
+        id: `${filePath}-${i}`,
+        values: await embedText(chunk),
+        metadata: {
+          text: chunk,
+          source: file.name,
+        },
+      }))
+    );
+
+    await index.upsert(vectors);
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Ingest error:", err);
     return NextResponse.json(
-      { error: "Unable to extract text from PDF (scanned PDF)" },
-      { status: 400 }
+      { error: "Failed to ingest document" },
+      { status: 500 }
     );
   }
-
-  if (!text.trim()) throw new Error("Empty document");
-
-  /* Summary */
-  const summary = await summarizeText(text);
-
-  await supabase.from("documents").insert({
-    filename: file.name,
-    summary,
-  });
-
-  /* Vector store */
-  const chunks = chunkText(text);
-
-  const vectors = await Promise.all(
-    chunks.map(async (chunk, i) => ({
-      id: `${file.name}-${i}`,
-      values: await embedText(chunk),
-      metadata: { text: chunk },
-    }))
-  );
-
-  await index.upsert(vectors);
-
-  await supabase.from("upload_logs").insert({});
-
-  return NextResponse.json({ success: true, summary });
 }

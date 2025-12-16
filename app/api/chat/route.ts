@@ -9,40 +9,38 @@ export async function POST(req: Request) {
   try {
     const { message } = await req.json();
 
-    if (!message || typeof message !== "string") {
+    if (!message?.trim()) {
       return NextResponse.json(
-        { error: "Message is required" },
+        { error: "Message required" },
         { status: 400 }
       );
     }
 
-    // 1. Embed user query
+    /* 1️⃣ Embed question */
     const embedding = await embedText(message);
 
-    // 2. Vector search
-    const res = await index.query({
+    /* 2️⃣ Pinecone search */
+    const result = await index.query({
       vector: embedding,
       topK: 5,
       includeMetadata: true,
     });
 
-    // 3. Build context safely
+    /* 3️⃣ Build context */
     const context =
-      res.matches
-        ?.map(
-          (m) => (m.metadata as { text?: string })?.text
-        )
+      result.matches
+        ?.map((m) => (m.metadata as any)?.text)
         .filter(Boolean)
-        .join("\n\n") ?? "";
+        .join("\n\n") || "";
 
-    // 4. Generate answer
+    /* 4️⃣ Generate answer */
     const answer = await generateAnswer(message, context);
 
     return NextResponse.json({ answer });
-  } catch (error) {
-    console.error("Chat error:", error);
+  } catch (err) {
+    console.error("Chat error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Chat failed" },
       { status: 500 }
     );
   }

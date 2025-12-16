@@ -8,7 +8,7 @@ export async function summarizeText(text: string): Promise<string> {
   if (!text.trim()) return "No content to summarize.";
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-1.5-flash", // ✅ FIXED
   });
 
   const prompt = `

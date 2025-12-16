@@ -2,26 +2,27 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-/**
- * Generate answer using retrieved context
- */
 export async function generateAnswer(
   question: string,
   context: string
 ): Promise<string> {
+  if (!context.trim()) {
+    return "I don't know.";
+  }
+
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-1.5-flash", 
   });
 
   const prompt = `
-You are a helpful AI assistant.
-Answer the question strictly using the provided context.
-If the answer is not found in the context, say "I don't know".
+You are a document-based assistant.
+Answer ONLY using the context.
+If the answer is not present, say "I don't know".
 
-CONTEXT:
-${context || "No context provided"}
+Context:
+${context}
 
-QUESTION:
+Question:
 ${question}
 `;
 

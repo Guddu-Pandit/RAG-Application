@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { SendHorizontal, Bot, User, Upload } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -24,13 +24,17 @@ export default function ChatPage() {
   >("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // ⏱ upload limiter (1 min)
   const lastUploadRef = useRef<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  /* ---------------- UPLOAD + INGEST ---------------- */
+  /* ✅ AUTO SCROLL WHEN MESSAGE UPDATES */
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  /* ---------------- UPLOAD ---------------- */
 
   async function uploadFile(file: File) {
-    // ⛔ Client-side rate limit
     if (lastUploadRef.current && Date.now() - lastUploadRef.current < 60_000) {
       alert("Please wait 1 minute before uploading another file.");
       return;
@@ -39,59 +43,41 @@ export default function ChatPage() {
     setUploadStatus("uploading");
     setUploadProgress(0);
 
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
+    const formData = new FormData();
+    formData.append("file", file);
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/ingest");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/ingest");
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setUploadProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
 
-      xhr.onload = () => {
-        // ✅ SUCCESS
-        if (xhr.status === 200) {
-          lastUploadRef.current = Date.now();
-          setUploadStatus("completed");
-          setUploadProgress(100);
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        lastUploadRef.current = Date.now();
+        setUploadStatus("completed");
+        setUploadProgress(100);
 
-          setTimeout(() => {
-            setUploadStatus("idle");
-            setUploadProgress(0);
-          }, 4000);
-        }
+        setTimeout(() => {
+          setUploadStatus("idle");
+          setUploadProgress(0);
+        }, 4000);
+      } else {
+        setUploadStatus("error");
+      }
+    };
 
-        // ⏱ RATE LIMIT FROM SERVER
-        else if (xhr.status === 429) {
-          setUploadStatus("error");
-          alert("Upload limited. Please wait 1 minute.");
-        }
-
-        // ❌ OTHER ERRORS
-        else {
-          setUploadStatus("error");
-        }
-      };
-
-      xhr.onerror = () => setUploadStatus("error");
-
-      xhr.send(formData);
-    } catch (err) {
-      console.error("Upload failed:", err);
-      setUploadStatus("error");
-    }
+    xhr.onerror = () => setUploadStatus("error");
+    xhr.send(formData);
   }
 
   /* ---------------- CHAT ---------------- */
 
   async function send() {
     if (!input.trim() || loading) return;
-
-    setUploadStatus("idle");
 
     const userMessage: Message = {
       role: "user",
@@ -101,6 +87,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
+    setUploadStatus("idle");
 
     try {
       const res = await fetch("/api/chat", {
@@ -118,7 +105,7 @@ export default function ChatPage() {
           content: data.answer || "I don't know.",
         },
       ]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -131,12 +118,14 @@ export default function ChatPage() {
     }
   }
 
-  /* ---------------- UI (UNCHANGED) ---------------- */
+  /* ---------------- UI ---------------- */
 
   return (
     <div className="min-h-screen flex bg-linear-to-b from-gray-700 to-gray-200 items-center justify-center p-4">
       <Card className="w-full max-w-3xl h-[85vh] flex flex-col rounded-2xl shadow-xl">
-        <CardHeader className="border-b">
+        
+        {/* HEADER */}
+        <CardHeader className="border-b shrink-0">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-primary" />
             <h1 className="text-lg font-semibold">RAG Assistant</h1>
@@ -146,7 +135,8 @@ export default function ChatPage() {
           </p>
         </CardHeader>
 
-        <CardContent className="flex-1 p-0">
+        {/* CHAT AREA (SCROLLABLE) */}
+        <CardContent className="flex-1 overflow-hidden p-0">
           <ScrollArea className="h-full px-6 py-4">
             <div className="space-y-4">
               {messages.map((msg, i) => (
@@ -190,27 +180,29 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
+
+              {/* 👇 AUTO SCROLL TARGET */}
+              <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
         </CardContent>
 
-        {/* INPUT */}
-        <div className="border-t p-4">
+        {/* INPUT (FIXED BOTTOM) */}
+        <div className="border-t p-4 shrink-0 bg-background">
           <div className="flex items-end gap-2">
             <Button
               type="button"
-              className="h-16 w-16 rounded-xl "
-              onClick={() => document.getElementById("file-upload")?.click()}
+              className="h-16 w-16 rounded-xl"
+              onClick={() =>
+                document.getElementById("file-upload")?.click()
+              }
             >
-              <Upload size={28} className="fontsize-1xl" />
+              <Upload size={28} />
             </Button>
 
             <Textarea
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                setUploadStatus("idle");
-              }}
+              onChange={(e) => setInput(e.target.value)}
               placeholder="Ask a question on uploaded document…"
               rows={2}
               className="resize-none"
@@ -227,7 +219,7 @@ export default function ChatPage() {
               disabled={loading}
               className="h-16 w-16 rounded-xl"
             >
-              <SendHorizontal size={30} className="fontsize-1xl" />
+              <SendHorizontal size={30} />
             </Button>
           </div>
 

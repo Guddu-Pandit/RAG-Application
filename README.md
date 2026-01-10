@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🤖 Advanced RAG Assistant
 
-## Getting Started
+A robust Retrieval-Augmented Generation (RAG) application built with **Next.js 16**, leveraging **Gemini 2.5 Flash** for intelligent answers and **Pinecone** for high-performance vector search. This project features a full document ingestion pipeline with support for PDF and DOCX files, automated summarization, and detailed observability via Langfuse.
 
-First, run the development server:
+## ✨ Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **📄 Multi-format Ingestion**: Upload and index `.pdf`, `.doc`, and `.docx` files effortlessly.
+- **🔍 Vector Search**: Powered by **Pinecone** and **OpenAI Embeddings** (`text-embedding-3-small`) for precise context retrieval.
+- **🧠 Advanced LLM**: Uses **Google Gemini 2.5 Flash** for generating high-quality, context-aware responses.
+- **📊 Observability**: Integrated with **Langfuse** for tracing document ingestion, retrieval quality, and chat performance.
+- **☁️ Storage**: **Supabase** handles secure file storage and metadata management.
+- **⚡ Modern UI**: A sleek, responsive chat interface built with **Tailwind CSS 4**, **Radix UI**, and **Lucide Icons**.
+
+## 🛠️ Tech Stack
+
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
+- **Language**: [TypeScript](https://www.typescriptlang.org/)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
+- **AI/ML**: 
+  - [Google Generative AI](https://ai.google.dev/) (Gemini 2.5 Flash)
+  - [OpenAI](https://openai.com/) (Embeddings)
+- **Vector Database**: [Pinecone](https://www.pinecone.io/)
+- **Backend/Storage**: [Supabase](https://supabase.com/)
+- **Monitoring**: [Langfuse](https://langfuse.com/)
+- **Text Extraction**: `unpdf` & `mammoth`
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+You'll need API keys for the following services:
+- **Google AI Studio**: For Gemini API key.
+- **OpenAI**: For embedding models.
+- **Pinecone**: For the vector index.
+- **Supabase**: For storage and project credentials.
+- **Langfuse**: For observability.
+
+### Environment Setup
+
+Create a `.env.local` file in the root directory and add the following:
+
+```env
+# AI Models
+GEMINI_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key
+
+# Pinecone
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=your_index_name
+
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# Langfuse
+LANGFUSE_PUBLIC_KEY=your_langfuse_public_key
+LANGFUSE_SECRET_KEY=your_langfuse_secret_key
+LANGFUSE_HOST=your_langfuse_host
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Installation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Guddu-Pandit/RAG-Application.git
+   cd rag
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-## Learn More
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📂 Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `app/api/ingest`: Route for processing and indexing documents.
+- `app/api/chat`: Route for RAG-based chat logic.
+- `lib/rag`: Core retrieval, embedding, and generation logic.
+- `lib/gemini`: Gemini-specific implementation.
+- `lib/pinecone`: Pinecone client configuration.
+- `lib/supabase`: Supabase database and storage clients.
+- `lib/langfuse`: Observability and tracing setup.
 
-## Deploy on Vercel
+## 📄 License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is licensed under the MIT License.

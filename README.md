@@ -92,3 +92,8 @@ LANGFUSE_HOST=your_langfuse_host
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+---
+
+Developed with ❤️ by [Guddu-Pandit](https://github.com/Guddu-Pandit)
+
